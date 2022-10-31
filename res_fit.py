@@ -170,3 +170,5 @@ plt.scatter(real[:, 0], real[:, 1])
 #     plt.scatter(trajectory0[:, i, 0], trajectory0[:, i, 1])
 plt.scatter(mean_tr[:, 0], mean_tr[:, 1])
 plt.show()
+
+print('')
