@@ -89,12 +89,15 @@ class LinearDynamic(nn.Module):
             return inputs @ self.A + self.b
 
 if __name__ == '__main__':
-    pc = 'desktop'
+    # pc = 'desktop'
     # pc = 'laptop'
+    pc = 'gauss'
     if pc == 'desktop':
         FILEPATH = 'D:\/Study_Files\/UCSB\/Projects\/WorkSpace\/DynamicFlow\/trajectory_data\/'
     elif pc == 'laptop':
         FILEPATH = 'D:\/Coding\/WorkSpace\/DynamicFlow\/trajectory_data\/'
+    elif pc == 'gauss':
+        FILEPATH = '/home/yuwang/Coding/WorkSpace/DynamicFlow/'
     else:
         FILEPATH = 'D:\/Study_Files\/UCSB\/Projects\/WorkSpace\/DynamicFlow\/trajectory_data\/'
 
