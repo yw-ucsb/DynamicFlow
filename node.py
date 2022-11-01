@@ -11,14 +11,15 @@ import torch.optim as optim
 
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=1000)
+parser.add_argument('--data_size', type=int, default=100)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=100)
-parser.add_argument('--test_freq', type=int, default=5)
+parser.add_argument('--niters', type=int, default=500)
+parser.add_argument('--test_freq', type=int, default=50)
 parser.add_argument('--viz', action='store_true', default=True)
 parser.add_argument('--gpu', type=int, default=0)
-parser.add_argument('--FILEPATH', type=str, default='D:\/Study_Files\/UCSB\/Projects\/WorkSpace\/DynamicFlow\/node\/')
+# parser.add_argument('--FILEPATH', type=str, default='D:\/Study_Files\/UCSB\/Projects\/WorkSpace\/DynamicFlow\/node\/')
+parser.add_argument('--FILEPATH', type=str, default='/home/yuwang/Coding/WorkSpace/DynamicFlow/node/')
 parser.add_argument('--adjoint', action='store_true', default=True)
 args = parser.parse_args()
 
@@ -149,6 +150,8 @@ if __name__ == '__main__':
     ax_vecfield = axes[2]
     # plt.show(block=False)
 
+    loss_plot = torch.zeros(args.niters)
+
     ii = 0
 
     func = ODEFunc().to(device)
@@ -165,6 +168,7 @@ if __name__ == '__main__':
         batch_y0, batch_t, batch_y = get_batch()
         pred_y = odeint(func, batch_y0, batch_t).to(device)
         loss = torch.mean(torch.abs(pred_y - batch_y))
+        loss_plot[itr - 1] = loss.detach().cpu()
         loss.backward()
         optimizer.step()
 
@@ -175,7 +179,11 @@ if __name__ == '__main__':
             with torch.no_grad():
                 pred_y = odeint(func, true_y0, t)
                 loss = torch.mean(torch.abs(pred_y - true_y))
+                # loss_plot[(itr // args.test_freq) - 1] = loss
                 print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
                 visualize(true_y, pred_y, func, ii)
                 ii += 1
         end = time.time()
+    plt.close(figure)
+    plt.plot(loss_plot)
+    plt.savefig(args.FILEPATH + 'loss.png')
