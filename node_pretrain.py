@@ -11,10 +11,10 @@ import torch.nn as nn
 import torch.optim as optim
 
 parser = argparse.ArgumentParser('ODE demo')
-parser.add_argument('--method', type=str, choices=['dopri5', 'euler'], default='dopri5')
+parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
 parser.add_argument('--total_steps', type=int, default=1000)
 parser.add_argument('--train_mode', type=str, choices=['uniform', 'random'], default='uniform')
-parser.add_argument('--batch_num_steps', type=int, default=20)
+parser.add_argument('--batch_num_steps', type=int, default=200)
 parser.add_argument('--batch_step_size', type=int, default=1)
 parser.add_argument('--rand_step_size_low', type=int, default=1)
 parser.add_argument('--rand_step_size_high', type=int, default=10)
@@ -30,7 +30,7 @@ args = parser.parse_args()
 
 class Lambda(nn.Module):
     def forward(self, t, y):
-        return torch.mm(y ** 2, true_A)
+        return y ** 3 @ true_A
 
 
 
@@ -69,7 +69,7 @@ def makedirs(dirname):
 
 
 
-def visualize(true_y, pred_y, odefunc, itr):
+def visualize(true_y, pred_y, odefunc):
     ax_traj.cla()
     ax_traj.set_title('Trajectories')
     ax_traj.set_xlabel('t')
@@ -108,7 +108,7 @@ def visualize(true_y, pred_y, odefunc, itr):
     ax_vecfield.set_ylim(-2, 2)
 
     figure.tight_layout()
-    plt.savefig(FILEPATH + 'demo_itr{:03d}.png'.format(itr))
+    plt.savefig(FILEPATH + 'demo_pretrain.png')
     # plt.draw()
     # plt.pause(0.001)
 
@@ -118,11 +118,11 @@ class ODEFunc(nn.Module):
         super(ODEFunc, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(2, 50),
+            nn.Linear(2, 16),
             nn.Tanh(),
             # nn.Linear(50, 50),
             # nn.Tanh(),
-            nn.Linear(50, 2),
+            nn.Linear(16, 2),
         )
 
         for m in self.net.modules():
@@ -133,24 +133,6 @@ class ODEFunc(nn.Module):
     def forward(self, t, y):
         return self.net(y)
 
-
-class RunningAverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self, momentum=0.99):
-        self.momentum = momentum
-        self.reset()
-
-    def reset(self):
-        self.val = None
-        self.avg = 0
-
-    def update(self, val):
-        if self.val is None:
-            self.avg = val
-        else:
-            self.avg = self.avg * self.momentum + val * (1 - self.momentum)
-        self.val = val
 
 
 if __name__ == '__main__':
@@ -184,7 +166,7 @@ if __name__ == '__main__':
     print('Computing true y...')
     t_start_true_y = time.time()
     with torch.no_grad():
-        true_y = odeint(Lambda().to(device), true_y0, t, method=args.method)
+        true_y = odeint(Lambda().to(device), true_y0, t, method='dopri5')
     t_end_true_y = time.time()
     print('True y takes:{:.3f}s'.format(t_end_true_y - t_start_true_y))
 
@@ -200,34 +182,8 @@ if __name__ == '__main__':
     ii = 0
 
     func = ODEFunc().to(device)
+    func.load_state_dict(torch.load(FILEPATH + 'cubic_fit.t'))
 
-    optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
-    end = time.time()
-    time_meter = RunningAverageMeter(0.97)
-
-    loss_meter = RunningAverageMeter(0.97)
-
-    tbar = tqdm(range(1, args.niters + 1))
-    for itr in tbar:
-        optimizer.zero_grad()
-        batch_y0, batch_t, batch_y = get_batch()
-        batch_pred_y = odeint(func, batch_y0, batch_t).to(device)
-        loss = torch.mean(torch.abs(batch_pred_y - batch_y))
-        loss_plot[itr - 1] = loss.detach().cpu()
-        loss.backward()
-        optimizer.step()
-
-        # time_meter.update(time.time() - end)
-        # loss_meter.update(loss.item())
-
-        if itr % args.test_freq == 0:
-            with torch.no_grad():
-                pred_y = odeint(func, true_y0, t)
-                total_loss = torch.mean(torch.abs(pred_y - true_y))
-                print('Iter {:04d} | Total Loss {:.4f}'.format(itr, total_loss.item()))
-                visualize(true_y, pred_y, func, ii)
-                ii += 1
-        end = time.time()
-    plt.close(figure)
-    plt.plot(loss_plot)
-    plt.savefig(FILEPATH + 'loss.png')
+    with torch.no_grad():
+        pred_y = odeint(func, true_y0, t)
+        visualize(true_y, pred_y, func)
