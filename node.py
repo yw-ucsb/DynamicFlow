@@ -14,37 +14,42 @@ parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'euler'], default='dopri5')
 parser.add_argument('--total_steps', type=int, default=1000)
 parser.add_argument('--train_mode', type=str, choices=['uniform', 'random'], default='uniform')
-parser.add_argument('--batch_num_steps', type=int, default=20)
+parser.add_argument('--add_training_noise', default=False)
+parser.add_argument('--noise_mean', type=float, default=0.)
+parser.add_argument('--noise_cov', type=float, default=0.00)
+parser.add_argument('--batch_num_steps', type=int, default=10)
 parser.add_argument('--batch_step_size', type=int, default=1)
 parser.add_argument('--rand_step_size_low', type=int, default=1)
 parser.add_argument('--rand_step_size_high', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=2000)
+parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--test_freq', type=int, default=50)
 parser.add_argument('--viz', action='store_true', default=True)
 parser.add_argument('--device', type=str, default='cpu')
-parser.add_argument('--pc', type=str, default='desktop')
+parser.add_argument('--pc', type=str, default='gauss')
 parser.add_argument('--adjoint', action='store_true', default=True)
 args = parser.parse_args()
 
 
 class Lambda(nn.Module):
     def forward(self, t, y):
-        return torch.mm(y ** 2, true_A)
+        return torch.mm(y ** 3, true_A)
 
 
 
 def get_batch():
     # D: dimension, M: batch_size, T: number of time steps to train;
+    # Uniform sampling training data from true trajectories;
     if args.train_mode == 'uniform':
         batch_total_steps = args.batch_step_size * args.batch_num_steps
         s = torch.from_numpy(
-            np.random.choice(np.arange(args.total_steps - batch_total_steps, dtype=np.int64), args.batch_size,
+            np.random.choice(np.arange(args.total_steps - 500 - batch_total_steps, dtype=np.int64), args.batch_size,
                              replace=False))
         batch_y0 = true_y[s]  # (M, D)
         batch_t = t[:batch_total_steps:args.batch_step_size]  # (T)
         batch_y = torch.stack([true_y[s + args.batch_step_size * i] for i in range(args.batch_num_steps)], dim=0)  # (T, M, D)
-        return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
+        # return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
+    # Random sampling interval;
     else:
         batch_steps_high = args.rand_step_size_high * args.batch_num_steps
         s = torch.from_numpy(
@@ -60,8 +65,11 @@ def get_batch():
 
         batch_t = t[t_index]
         batch_y = torch.stack([true_y[s + t_index[i]] for i in range(args.batch_num_steps)], dim=0)
+    # Add noise to the sampled training data;
+    if args.add_training_noise:
+        batch_y = batch_y + args.noise_mean + args.noise_cov * torch.randn(batch_y.shape)
 
-        return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
+    return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 
 def makedirs(dirname):
     if not os.path.exists(dirname):
@@ -131,26 +139,8 @@ class ODEFunc(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, y):
-        return self.net(y)
+        return self.net(y ** 3)
 
-
-class RunningAverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self, momentum=0.99):
-        self.momentum = momentum
-        self.reset()
-
-    def reset(self):
-        self.val = None
-        self.avg = 0
-
-    def update(self, val):
-        if self.val is None:
-            self.avg = val
-        else:
-            self.avg = self.avg * self.momentum + val * (1 - self.momentum)
-        self.val = val
 
 
 if __name__ == '__main__':
@@ -202,10 +192,6 @@ if __name__ == '__main__':
     func = ODEFunc().to(device)
 
     optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
-    end = time.time()
-    time_meter = RunningAverageMeter(0.97)
-
-    loss_meter = RunningAverageMeter(0.97)
 
     tbar = tqdm(range(1, args.niters + 1))
     for itr in tbar:

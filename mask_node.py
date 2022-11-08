@@ -14,7 +14,7 @@ parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'euler'], default='dopri5')
 parser.add_argument('--total_steps', type=int, default=1000)
 parser.add_argument('--train_mode', type=str, choices=['uniform', 'random'], default='uniform')
-parser.add_argument('--batch_num_steps', type=int, default=20)
+parser.add_argument('--batch_num_steps', type=int, default=10)
 parser.add_argument('--batch_step_size', type=int, default=1)
 parser.add_argument('--rand_step_size_low', type=int, default=1)
 parser.add_argument('--rand_step_size_high', type=int, default=10)
@@ -30,7 +30,7 @@ args = parser.parse_args()
 
 class Lambda(nn.Module):
     def forward(self, t, y):
-        return torch.mm(y ** 2, true_A)
+        return torch.mm(y ** 3, true_A)
 
 
 
