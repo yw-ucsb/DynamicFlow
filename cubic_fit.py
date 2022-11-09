@@ -28,7 +28,7 @@ args = parser.parse_args()
 
 class Lambda(nn.Module):
     def forward(self, t, y):
-        return y ** 2 @ true_A
+        return y ** 3 @ true_A
 
 class mlp(nn.Module):
     def __init__(self):

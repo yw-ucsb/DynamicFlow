@@ -16,7 +16,7 @@ parser.add_argument('--total_steps', type=int, default=1000)
 parser.add_argument('--train_mode', type=str, choices=['uniform', 'random'], default='uniform')
 parser.add_argument('--add_training_noise', default=False)
 parser.add_argument('--noise_mean', type=float, default=0.)
-parser.add_argument('--noise_cov', type=float, default=0.02)
+parser.add_argument('--noise_cov', type=float, default=0.1)
 parser.add_argument('--batch_num_steps', type=int, default=10)
 parser.add_argument('--batch_step_size', type=int, default=1)
 parser.add_argument('--rand_step_size_low', type=int, default=1)
@@ -53,7 +53,7 @@ def get_batch(_train_y):
     else:
         batch_steps_high = args.rand_step_size_high * args.batch_num_steps
         s = torch.from_numpy(
-            np.random.choice(np.arange(args.total_steps - batch_steps_high, dtype=np.int64), args.batch_size,
+            np.random.choice(np.arange(args.total_steps - 900 - batch_steps_high, dtype=np.int64), args.batch_size,
                              replace=False))
         batch_y0 = _train_y[s]  # (M, D)
         # Generate random time intervals;
@@ -77,7 +77,7 @@ def makedirs(dirname):
 
 
 
-def visualize(true_y, train_y, pred_y, pred_cloner_y, odefunc, itr):
+def visualize(true_y, train_y, pred_y, odefunc, itr):
     ax_traj.cla()
     ax_traj.set_title('Trajectories')
     ax_traj.set_xlabel('t')
@@ -97,7 +97,6 @@ def visualize(true_y, train_y, pred_y, pred_cloner_y, odefunc, itr):
     ax_phase.plot(true_y.cpu().numpy()[:, 0, 0], true_y.cpu().numpy()[:, 0, 1], 'g-', label='true')
     ax_phase.scatter(train_y.cpu().numpy()[:, 0, 0], train_y.cpu().numpy()[:, 0, 1], c='g', label='train')
     ax_phase.plot(pred_y.cpu().numpy()[:, 0, 0], pred_y.cpu().numpy()[:, 0, 1], 'b--', label='pred')
-    ax_phase.plot(pred_cloner_y.cpu().numpy()[:, 0, 0], pred_cloner_y.cpu().numpy()[:, 0, 1], 'y--', label='cloner')
     ax_phase.set_xlim(-2, 2)
     ax_phase.set_ylim(-2, 2)
     ax_phase.legend()
@@ -196,46 +195,35 @@ if __name__ == '__main__':
     ii = 0
 
     func = ODEFunc().to(device)
-    cloner = ODEFunc().to(device)
 
-    optimizer_func = optim.RMSprop(func.parameters(), lr=1e-3)
-    optimizer_cloner = optim.RMSprop(cloner.parameters(), lr=1e-3)
+    optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
 
     tbar = tqdm(range(1, args.niters + 1))
     for itr in tbar:
-        # Train func with real data;
-        optimizer_func.zero_grad()
-        batch_y0, batch_t, batch_train_y = get_batch(train_y)
+        optimizer.zero_grad()
+        batch_y0, batch_t, batch_y = get_batch(train_y)
         batch_pred_y = odeint(func, batch_y0, batch_t).to(device)
-        loss_func = torch.mean(torch.abs(batch_pred_y - batch_train_y))
-        loss_plot[itr - 1] = loss_func.detach().cpu()
-        loss_func.backward()
-        optimizer_func.step()
+        loss = torch.mean(torch.abs(batch_pred_y - batch_y))
+        loss_plot[itr - 1] = loss.detach().cpu()
+        loss.backward()
+        optimizer.step()
 
-        # Train cloner with data generated from func;
-        optimizer_cloner.zero_grad()
         func_y = odeint(func, true_y0, t)
-        batch_cloner_y0, batch_cloner_t, batch_cloner_train_y = get_batch(func_y)
-        batch_cloner_pred_y = odeint(cloner, batch_cloner_y0, batch_cloner_t).to(device)
-        loss_cloner = torch.mean(torch.abs(batch_cloner_pred_y - batch_cloner_train_y))
-        loss_cloner.backward()
-        optimizer_cloner.step()
-
-        # pred_cloner_y = odeint(cloner, true_y0, t)
-        # plt.cla()
-        # plt.scatter(func_y.detach().cpu()[:, 0, 0], func_y.detach().cpu()[:, 0, 1], c='b')
-        # plt.scatter(pred_cloner_y.detach().cpu()[:, 0, 0], pred_cloner_y.detach().cpu()[:, 0, 1], c='g')
-        # plt.savefig(FILEPATH + 't_itr{:03d}.png'.format(itr))
-
+        batch_y0, batch_t, batch_y = get_batch(func_y)
+        optimizer.zero_grad()
+        batch_pred_y = odeint(func, batch_y0, batch_t).to(device)
+        loss = torch.mean(torch.abs(batch_pred_y - batch_y))
+        loss.backward()
+        optimizer.step()
 
         if itr % args.test_freq == 0:
             with torch.no_grad():
                 pred_y = odeint(func, true_y0, t)
-                pred_cloner_y = odeint(cloner, true_y0, t)
                 total_loss = torch.mean(torch.abs(pred_y - true_y))
                 print('Iter {:04d} | Total Loss {:.4f}'.format(itr, total_loss.item()))
-                visualize(true_y, train_y, pred_y, pred_cloner_y, func, ii)
+                visualize(true_y, train_y, pred_y, func, ii)
                 ii += 1
+        end = time.time()
     plt.close(figure)
     plt.plot(loss_plot)
     plt.savefig(FILEPATH + 'loss.png')

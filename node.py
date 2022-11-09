@@ -16,7 +16,7 @@ parser.add_argument('--total_steps', type=int, default=1000)
 parser.add_argument('--train_mode', type=str, choices=['uniform', 'random'], default='uniform')
 parser.add_argument('--add_training_noise', default=False)
 parser.add_argument('--noise_mean', type=float, default=0.)
-parser.add_argument('--noise_cov', type=float, default=0.00)
+parser.add_argument('--noise_cov', type=float, default=0.1)
 parser.add_argument('--batch_num_steps', type=int, default=10)
 parser.add_argument('--batch_step_size', type=int, default=1)
 parser.add_argument('--rand_step_size_low', type=int, default=1)
@@ -26,7 +26,7 @@ parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--test_freq', type=int, default=50)
 parser.add_argument('--viz', action='store_true', default=True)
 parser.add_argument('--device', type=str, default='cpu')
-parser.add_argument('--pc', type=str, default='gauss')
+parser.add_argument('--pc', type=str, default='desktop')
 parser.add_argument('--adjoint', action='store_true', default=True)
 args = parser.parse_args()
 
@@ -37,25 +37,25 @@ class Lambda(nn.Module):
 
 
 
-def get_batch():
+def get_batch(_train_y):
     # D: dimension, M: batch_size, T: number of time steps to train;
     # Uniform sampling training data from true trajectories;
     if args.train_mode == 'uniform':
         batch_total_steps = args.batch_step_size * args.batch_num_steps
         s = torch.from_numpy(
-            np.random.choice(np.arange(args.total_steps - 500 - batch_total_steps, dtype=np.int64), args.batch_size,
+            np.random.choice(np.arange(0, args.total_steps - 900 - batch_total_steps, dtype=np.int64), args.batch_size,
                              replace=False))
-        batch_y0 = true_y[s]  # (M, D)
+        batch_y0 = _train_y[s]  # (M, D)
         batch_t = t[:batch_total_steps:args.batch_step_size]  # (T)
-        batch_y = torch.stack([true_y[s + args.batch_step_size * i] for i in range(args.batch_num_steps)], dim=0)  # (T, M, D)
+        batch_y = torch.stack([_train_y[s + args.batch_step_size * i] for i in range(args.batch_num_steps)], dim=0)  # (T, M, D)
         # return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
     # Random sampling interval;
     else:
         batch_steps_high = args.rand_step_size_high * args.batch_num_steps
         s = torch.from_numpy(
-            np.random.choice(np.arange(args.total_steps - batch_steps_high, dtype=np.int64), args.batch_size,
+            np.random.choice(np.arange(args.total_steps -900 - batch_steps_high, dtype=np.int64), args.batch_size,
                              replace=False))
-        batch_y0 = true_y[s]  # (M, D)
+        batch_y0 = _train_y[s]  # (M, D)
         # Generate random time intervals;
         t_index = np.zeros(args.batch_num_steps, dtype=np.int64)
         for i in range(1, args.batch_num_steps):
@@ -64,10 +64,10 @@ def get_batch():
             t_index[i] = t_index[i - 1] + rand_step_size
 
         batch_t = t[t_index]
-        batch_y = torch.stack([true_y[s + t_index[i]] for i in range(args.batch_num_steps)], dim=0)
-    # Add noise to the sampled training data;
-    if args.add_training_noise:
-        batch_y = batch_y + args.noise_mean + args.noise_cov * torch.randn(batch_y.shape)
+        batch_y = torch.stack([_train_y[s + t_index[i]] for i in range(args.batch_num_steps)], dim=0)
+    # # Add noise to the sampled training data;
+    # if args.add_training_noise:
+    #     batch_y = batch_y + args.noise_mean + args.noise_cov * torch.randn(batch_y.shape)
 
     return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 
@@ -77,7 +77,7 @@ def makedirs(dirname):
 
 
 
-def visualize(true_y, pred_y, odefunc, itr):
+def visualize(true_y, train_y, pred_y, odefunc, itr):
     ax_traj.cla()
     ax_traj.set_title('Trajectories')
     ax_traj.set_xlabel('t')
@@ -95,6 +95,7 @@ def visualize(true_y, pred_y, odefunc, itr):
     ax_phase.set_xlabel('x')
     ax_phase.set_ylabel('y')
     ax_phase.plot(true_y.cpu().numpy()[:, 0, 0], true_y.cpu().numpy()[:, 0, 1], 'g-', label='true')
+    ax_phase.scatter(train_y.cpu().numpy()[:, 0, 0], train_y.cpu().numpy()[:, 0, 1], c='g', label='train')
     ax_phase.plot(pred_y.cpu().numpy()[:, 0, 0], pred_y.cpu().numpy()[:, 0, 1], 'b--', label='pred')
     ax_phase.set_xlim(-2, 2)
     ax_phase.set_ylim(-2, 2)
@@ -176,6 +177,10 @@ if __name__ == '__main__':
     with torch.no_grad():
         true_y = odeint(Lambda().to(device), true_y0, t, method=args.method)
     t_end_true_y = time.time()
+    if args.add_training_noise:
+        train_y = true_y + args.noise_mean + args.noise_cov * torch.randn(true_y.shape)
+    else:
+        train_y = true_y
     print('True y takes:{:.3f}s'.format(t_end_true_y - t_start_true_y))
 
     # print('Base draw.')
@@ -196,7 +201,7 @@ if __name__ == '__main__':
     tbar = tqdm(range(1, args.niters + 1))
     for itr in tbar:
         optimizer.zero_grad()
-        batch_y0, batch_t, batch_y = get_batch()
+        batch_y0, batch_t, batch_y = get_batch(train_y)
         batch_pred_y = odeint(func, batch_y0, batch_t).to(device)
         loss = torch.mean(torch.abs(batch_pred_y - batch_y))
         loss_plot[itr - 1] = loss.detach().cpu()
@@ -211,7 +216,7 @@ if __name__ == '__main__':
                 pred_y = odeint(func, true_y0, t)
                 total_loss = torch.mean(torch.abs(pred_y - true_y))
                 print('Iter {:04d} | Total Loss {:.4f}'.format(itr, total_loss.item()))
-                visualize(true_y, pred_y, func, ii)
+                visualize(true_y, train_y, pred_y, func, ii)
                 ii += 1
         end = time.time()
     plt.close(figure)
